@@ -1,0 +1,871 @@
+---
+title: "P3 cortex metabolomics"
+author: "Raymond Yuan SHANG"
+date: "02/07/2025"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+
+
+```
+
+```{r}
+#install.packages("rJava")
+#Sys.getenv("JAVA_HOME")
+
+#Sys.setenv(JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk1.8.0_181.jdk/Contents/Home")
+
+#Sys.getenv("DYLD_FALLBACK_LIBRARY_PATH")
+#Sys.getenv("DYLD_LIBRARY_PATH")
+#"/Library/Frameworks/R.framework/Resources/lib:/Users/yshang/lib:/usr/local/lib:/usr/lib:::/lib:/Library/Java/JavaVirtualMachines/jdk-9.jdk/Contents/Home/lib/server"
+#Sys.setenv(DYLD_FALLBACK_LIBRARY_PATH="/Library/Frameworks/R.framework/Resources/lib:/Users/yshang/lib:/usr/local/lib:/usr/lib:::/lib:/Library/Java/JavaVirtualMachines/jdk1.8.0_181.jdk/Contents/Home/lib/server")
+#Sys.setenv(DYLD_LIBRARY_PATH="/Library/Java/JavaVirtualMachines/jdk1.8.0_181.jdk/Contents/Home/jre/lib/server")
+options(java.parameters = "-Xmx20000m")
+library("rJava")
+#library("RDAVIDWebService")               
+#library(AnnotationHub)
+library(clusterProfiler)
+library(DOSE)
+library(enrichplot)
+#library(org.Hs.eg.db)
+#library(org.Rn.eg.db)
+
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("tximport")
+#biocLite("DESeq2")
+#biocLite("readxl")
+#biocLite("dplyr")
+#biocLite("tidyverse")
+#biocLite("tximportData")
+#biocLite("gridExtra")
+#biocLite("rhdf5")
+
+
+#install.packages("xlsx")
+#install.packages("openxlsx")
+#detach("package:xlsx", unload=TRUE) 
+#detach("package:XLConnect",unload=TRUE) 
+library(openxlsx)
+#library(xlsx)
+library("tximport")
+library("readr")
+#library("tximportData")
+library("DESeq2")
+library("limma")
+#library("Glimma")
+library("edgeR")
+library("readxl")
+library("dplyr")
+library("gridExtra")
+library("tidyverse")
+library("ggplot2")
+library("statmod")
+library(RColorBrewer)
+#10222018_cameraPathview.RData
+#load("~/Dropbox/human/ROSMAP/RNASeq/10222018_cameraPathview.RData")
+
+options(stringsAsFactors=FALSE)
+theme_set(theme_bw())
+theme_update(plot.title = element_text(hjust = 0.5),panel.grid.minor = element_blank(),panel.grid.major = element_blank())
+
+
+{
+display.brewer.pal(n = 8, name = 'Paired')
+brewer.pal(n = 8, name = "Paired")
+}
+color_2pairs <- c("#B2DF8A","#33A02C" ,"#FDBF6F" ,"#FF7F00")
+
+```
+
+##Read the demograph data
+```{r}
+home_d = "~/Dropbox/mouse"
+
+#AllSamples_Neil.xlsx
+demographes_global <- read.xlsx(file.path(home_d,"AllSamples_Neil.xlsx"), sheet = 1, startRow = 1, colNames = TRUE,rowNames = FALSE)
+
+
+str(demographes_global)
+head(demographes_global)
+
+demographes_metabolite <- read.xlsx(file.path(home_d,"metabolites","samples_demographics2.xlsx"), sheet = 1, startRow = 1, colNames = TRUE,rowNames = FALSE)
+#join(demographes_metabolite,demographes_global,by.x="Sample",by.y="Ear.Tag",type="inner")
+demographes_metabolite$Genotype = gsub("APOE3","3_3",demographes_metabolite$Genotype)
+demographes_metabolite$Genotype = gsub("APOE4","4_4",demographes_metabolite$Genotype)
+demographes_metabolite$Genotype = gsub("APOE 3/4","3_4",demographes_metabolite$Genotype)
+
+#demographes_metabolite$Sex = factor(demographes_metabolite$Sex,levels=c("Male","Female"))
+#demographes_metabolite$Genotype = factor(demographes_metabolite$Genotype,levels=c("3_3","3_4","4_4"))
+#demographes_metabolite$Treatment = factor(demographes_metabolite$Treatment,levels=c("Allo","Vehicle"))
+s2c <- demographes_metabolite
+s2c <- demographes_metabolite
+s2c$Sex <- gsub("Female","F",s2c$Sex)
+s2c$Sex <- gsub("Male","M",s2c$Sex)
+```
+
+##Read the global Name data
+```{r}
+home_d = "~/Dropbox/RaymondTools/metabolomics/p180"
+
+names_p180 <- read.xlsx(file.path(home_d,"names_p180.xlsx"), sheet = 1, startRow = 1, colNames = TRUE,rowNames = FALSE)
+
+str(names_p180)
+head(names_p180)
+```
+
+
+
+
+##setup design
+
+```{r}
+s2c2 <- s2c[s2c$Treatment %in% c("Vehicle") & s2c$Genotype != "3_4",]
+s2c2$Sex <- factor(s2c2$Sex,levels=c("M","F"))
+#s2c2$Genotype <- s2c2$Genotype
+s2c2$Genotype <- gsub("3_3","APOE3",s2c2$Genotype )
+s2c2$Genotype <- gsub("4_4","APOE4",s2c2$Genotype )
+
+s2c2$APOE <- factor(s2c2$Genotype,levels=c("APOE3","APOE4")) #,"3_4"
+s2c2$group1 <- paste0(s2c2$Sex,".",s2c2$APOE)
+s2c2$group1 <- factor(s2c2$group1,levels=c("M.APOE3","M.APOE4","F.APOE3","F.APOE4"))
+
+
+s2c2$Sex.APOE <- paste0(s2c2$Sex,".",s2c2$Genotype)
+s2c2$Sex.APOE <- factor(s2c2$Sex.APOE ,levels = c("M.APOE3","M.APOE4","F.APOE3","F.APOE4"))
+rownames(s2c2) <- s2c2$Sample
+
+
+#s2c2$group2 <- paste0(s2c2$Treatment,".",s2c2$APOE)
+#s2c2$group2 <- factor(s2c2$group2,levels=c("Placebo.APOE3","Placebo.APOE4","Allo.APOE3","Allo.APOE4"))
+
+
+design <- model.matrix(~s2c2$group1)
+
+colnames(design) <- gsub("s2c2\\$group1", "", colnames(design))
+head(design)
+
+if(colnames(design)[1] == "(Intercept)"){
+  colnames(design)[1] <- "Intercept"
+}
+head(design)
+
+
+design2 <- model.matrix(~s2c2$Sex * s2c2$Genotype)
+colnames(design2) <- gsub("s2c2\\$", "", colnames(design2))
+colnames(design2) <- gsub("Sex", "", colnames(design2))
+colnames(design2) <- gsub("Genotype", "", colnames(design2))
+colnames(design2) <- gsub(":", ".", colnames(design2))
+
+head(design2)
+if(colnames(design2)[1] == "(Intercept)"){
+  colnames(design2)[1] <- "Intercept"
+}
+
+head(design2)
+```
+
+```{r}
+colnames(design)
+treatment <- c("Vehicle","Allo")
+sex <- c("Female","Male")
+apoe_genotype <- c("APOE3","APOE4")
+contr.matrix<- makeContrasts(
+   APOE4vsAPOE3_Male = M.APOE4, 
+   APOE4vsAPOE3_Female = F.APOE4-F.APOE3, 
+   FemalevsMale_APOE3 = F.APOE3,
+   FemalevsMale_APOE4 = F.APOE4-M.APOE4,
+   FemalevsMale_APOE4vsAPOE3 = F.APOE4-F.APOE3 - M.APOE4,
+   #APOE4vsAPOE3_FemalevsMale = F.APOE4-M.APOE4 - Femal.APOE3,
+   #FemalevsMale_Allo = Allo.Female-Allo.Male,
+   #FemalevsMale_AllovsPlacebo = Allo.Female-Placebo.Female - Allo.Male,
+   levels = colnames(design))
+contr.matrix
+
+if(FALSE){
+contr.matrix2 <- makeContrasts(
+   AllovsPlacebo_APOE3 = Allo.APOE3, 
+   AllovsPlacebo_APOE4 = Allo.APOE4-Placebo.APOE4, 
+   APOE4vs3_Placebo = Placebo.APOE4,
+   APOE4vs3_Allo = Allo.APOE4 - Allo.APOE3,
+   APOE4vsAPOE3_AllovsPlacebo = (Allo.APOE4-Placebo.APOE4)-Allo.APOE3,
+   levels = colnames(design2))
+contr.matrix2
+}
+
+```
+
+
+
+
+##Read the normalized metabolite data
+```{r}
+home_d = "~/Dropbox/mouse/metabolites"
+#data_normalized_plasma_4groups
+data_plasma <- read.delim2(file.path(home_d,"data_normalized_plasma_4groups.csv"),sep=",")
+#str(data_plasma)
+head(data_plasma)
+data_plasma <- data_plasma[-1,]
+names <- data_plasma$X
+data_plasma <- data_plasma[,-1]
+colnames(data_plasma) <- gsub("Plasma","S",colnames(data_plasma))
+data_plasma=sapply(data_plasma,as.numeric)
+rownames(data_plasma) <- names
+
+#str(data_plasma)
+head(data_plasma)
+
+```
+
+
+##Read rawdata
+```{r}
+home_d = "~/Dropbox/mouse/metabolites"
+#data_normalized_plasma_4groups
+data_plasma_raw <- read.delim2(file.path(home_d,"P180_Raw_Plasma_4Group.csv"),sep=",",check.names = F)
+#str(data_plasma_raw)
+data_plasma_raw <- t(data_plasma_raw)
+head(data_plasma_raw)
+data_plasma_raw <- data.frame(data_plasma_raw,check.names = F)
+samplenames <- data_plasma_raw[1,]
+colnames(samplenames) <- NULL
+samplenames <- as.vector(t(samplenames))
+colnames(data_plasma_raw) <- samplenames
+data_plasma_raw <- data_plasma_raw[-c(1,2),]
+data_plasma_raw2 <- apply(data_plasma_raw,2,as.numeric)
+rownames(data_plasma_raw2) <- rownames(data_plasma_raw)
+data_plasma_raw2 <- data.frame(data_plasma_raw2,check.names = F)
+
+data_plasma_raw <- data_plasma_raw2
+
+
+#str(data_plasma)
+head(data_plasma_raw)
+rownames(data_plasma_raw)
+```
+
+##test
+
+
+
+```{r}
+unique(names_p180$Category)
+#"Acylcarnitine"       "Amino acid"          "Biogenic amine"      "Glycerophospholipid" "Sphingolipid"        "Hexose"              "MetIndicator" 
+data_plasma_raw["Total PC ae",]
+names_tmp <- names_p180$Name[names_p180$Category=="Sphingolipid"]
+names_tmp <- names_p180$Name[names_p180$Category=="Amino acid"]
+
+sum(data_plasma_raw[names_tmp,3]) - data_plasma_raw["Total AA",3]
+sum(data_plasma_raw[names_tmp,3]) - data_plasma_raw["Total SM-non OH",3]-data_plasma_raw["Total SM-OH",3]
+```
+
+```{r}
+rownames(data_plasma_raw)[185:length(rownames(data_plasma_raw))]
+```
+
+#customer groups
+```{r}
+AutoNorm<-function(x){
+	(x - mean(x))/sd(x, na.rm=T);
+}
+
+LogNorm<-function(x,min.val){
+	 log2((x + sqrt(x^2 + min.val^2))/2)
+}
+
+min.val <- min(abs(data_plasma_raw[data_plasma_raw!=0]))/10;
+#data<-apply(data, 2, LogNorm, min.val);
+
+
+```
+
+```{r}
+#groupnames_customer <- c("Total SM","Total PC ae","Total lysoPC","Total AA","Glucogenic AA","BCAA","Total lysoPC / PCae","Total AC-OH / Total AC","Total AC / C0","CPT-I ratio","C2 / C0","C0")
+groupnames_customer <- c("Total AA","Glucogenic AA",#"BCAA",
+                         "Total AC","Total AC / C0",
+                         "Total SM",
+                         "Total lysoPC / PCae"
+                         #"Total PC ae","Total lysoPC",,
+                         )  
+groupnames_customer[(groupnames_customer %in% rownames(data_plasma_raw))] -> tmp
+data_plasma_raw[tmp,]
+data_plasma_raw["Total lysoPC",] / data_plasma_raw["Total PC ae",] -> tmp2
+rownames(tmp2) <- "Total lysoPC / PCae"
+
+names_tmp4 <- rownames(data_plasma_raw)[c(2:40)]
+apply(data_plasma_raw[names_tmp4,],2,sum) %>% t -> tmp4
+rownames(tmp4) <- "Total AC"
+
+
+rbind(data_plasma_raw[tmp,],tmp2,tmp4) -> data_customer
+data_customer[groupnames_customer,] -> data_customer
+colnames(data_customer) <- gsub("Plasma","S",colnames(data_customer))
+#data_customer_norm <- log2( (data_customer + sqrt(data_customer^2 +1 ) )/2)
+#scale(data_customer_norm) -> data_customer_norm2
+data_customer_norm <- apply(data_customer, 2, LogNorm, min.val);
+apply(data_customer_norm, 1, AutoNorm) %>% t -> data_customer_norm3;
+data_customer_norm3["Total SM",] - data_plasma["Total SM",colnames(data_customer_norm3)]
+#data_customer_norm3["Total SM",] - data_customer_norm2["Total SM",colnames(data_customer_norm3)]
+
+data_customer_norm3[groupnames_customer,] -> data_customer_norm3
+data_customer_norm3
+```
+
+
+
+
+##Plot density maps
+```{r}
+data_plasma2 <- data_customer_norm3[,s2c2$Sample]
+rownames(data_plasma2)
+colnames(data_plasma2)
+groups_veh <- c("F.APOE3","F.APOE4","M.APOE3","M.APOE4")
+s2c2$Group <- s2c2$group1
+plot(density(data_plasma2[,1]),ylim=c(0,0.7),col=color_2pairs[2])
+for(i in 2:length(colnames(data_plasma2))){
+  current_sample <- colnames(data_plasma2)[i]
+  s2c2$Group[match(current_sample, s2c2$Sample)] %>% as.character %>% match(groups_veh) -> col_index
+  lines(density(data_plasma2[,i]),col=color_2pairs[col_index])
+}
+```
+
+#PCA analysis
+####PCA functions
+Functions
+```{r}
+myPCA <-function(mat_set_f,title_f ="My PCA", condition_f,log_f=FALSE, center_f=TRUE, scale_f=FALSE,pc_x_f=1L,pc_y_f=2L,color_set_f=NA){
+  #Notice, the colnames of mat_set_f should be the sample names, the rownames of mat_set_f should be gene names
+  #pc_x_f=1L
+  #pc_y_f=2L
+  if(log_f){
+    mat_set_f <- log2(mat_set_f+1)
+  }
+  mat_set_f.pca <- prcomp(t(mat_set_f),center = center_f,scale. = scale_f) 
+  #computation of variances
+  eigenvalues <- (mat_set_f.pca$sdev) ^ 2
+  var_explained <- eigenvalues * 100 / sum(eigenvalues)
+  
+  #set label names
+  x_lab <- paste0('PC',pc_x_f,' (', round(var_explained[pc_x_f],digits=1))
+  x_lab <- paste0(x_lab, '%)')
+  y_lab <- paste0('PC',pc_y_f,' (', round(var_explained[pc_y_f],digits=1))
+  y_lab <- paste0(y_lab, '%)')
+  
+  #Extract PC1 and PC2 to pcs, you can also change this PC1 and PC2 to others
+  pcs_set_f <- data.frame(mat_set_f.pca$x[, c(pc_x_f, pc_y_f)])
+  pcs_set_f$Sample <- rownames(pcs_set_f)
+  rownames(pcs_set_f) <- NULL
+  #add 'Group' information from experimental design
+  pcs_set_f <- dplyr::left_join(pcs_set_f, condition_f,by = 'Sample')
+  #ggplot
+  pc_x_f <- paste0('PC', pc_x_f)
+  pc_y_f <- paste0('PC', pc_y_f)
+  p1 <-ggplot(pcs_set_f, aes_string(pc_x_f, pc_y_f, colour = 'Group'))+  
+    geom_point(size = 5, alpha = 0.8)  +
+    ggtitle(title_f)+
+    xlab(x_lab)+
+    ylab(y_lab)+
+    theme(text = element_text(size=10),axis.text = element_text(size=9),plot.title = element_text(size = 10)) +
+    theme(plot.title = element_text(hjust = 0.5))
+  if(! is.na(color_set_f[1])){
+    p1 <- p1 + scale_color_manual(values=c(color_set_f))
+  }
+  result <- list(plot = p1,data = mat_set_f.pca)
+  return (result)
+}
+
+myPCAerrorBar <- function(myPCA_f,groupvars_f="Group",title_f="PCA with error bar",bar_f="se",color_set_f=NA){
+  library("Rmisc")
+  if(FALSE){
+    pcs_f <-p2$data
+    groupvars_f <- "Group"
+    title_f <-"PCA with error bar"
+    bar_f <-"se"
+  }
+  pcs_f <- myPCA_f$plot$data
+  label_x_f <- colnames(myPCA_f$plot$data)[1]
+  label_y_f <- colnames(myPCA_f$plot$data)[2]
+  se_x_f <- summarySE(pcs_f,measurevar = label_x_f,groupvars=groupvars_f,conf.interval = 0.95)
+  se_y_f <- summarySE(pcs_f,measurevar = label_y_f,groupvars=groupvars_f,conf.interval = 0.95)
+  temp_x <- dplyr::select(se_x_f,Group=groupvars_f,PC1=label_x_f,ci_PC1='ci',se_PC1='se',sd_PC1='sd')
+  temp_y <- dplyr::select(se_y_f,Group=groupvars_f,PC2=label_y_f,ci_PC2='ci',se_PC2='se',sd_PC2='sd')
+  df_f_group <- dplyr::left_join(temp_x, temp_y,by=groupvars_f)
+  
+  title_f <- paste0(title_f," (",bar_f,")")
+  ybar <- 0
+  xbar <-0
+  
+  ybar <- as.name(paste0(bar_f,"_",label_x_f))
+  xbar <- as.name(paste0(bar_f,"_",label_y_f))
+  
+  eigenvalues <- (myPCA_f$data$sdev) ^ 2
+  var_explained <- eigenvalues * 100 / sum(eigenvalues)
+  x_lab <- paste0(label_x_f,' (', round(var_explained[1],digits=1))
+  x_lab <- paste0(x_lab, '%)')
+  y_lab <- paste0(label_y_f,' (', round(var_explained[2],digits=1))
+  y_lab <- paste0(y_lab, '%)')
+  
+  p<-ggplot(data = df_f_group,aes_string( x=label_x_f, y=label_y_f,colour=groupvars_f)) + 
+    geom_point(size=7,alpha=0.5) + 
+    geom_errorbar(aes(ymin = PC2-eval(ybar),ymax = PC2+eval(ybar))) + 
+    geom_errorbarh(aes(xmin = PC1-eval(xbar),xmax = PC1+eval(xbar)))+
+    ggtitle(title_f)+
+    xlab(x_lab)+
+    ylab(y_lab)+
+    theme(plot.title = element_text(hjust = 0.5))+
+    theme(text = element_text(size=10),axis.text = element_text(size=9),plot.title = element_text(size = 10))
+  
+  if(! is.na(color_set_f[1])){
+    p <- p + scale_color_manual(values=c(color_set_f))
+    p <- p + scale_fill_manual(values=c(color_set_f))
+
+  }
+  return (p)
+}
+
+
+myPCAplot <- function(geneset_f,name_f,shortname_f,condition_f,vsd_data_f,directory_f,log_f=FALSE,center_f=TRUE,scale_f=FALSE,pc_x_f=1L,pc_y_f=2L,color_set_f=NA){
+  #
+  if(FALSE){
+  geneset_f<- geneset2
+  name_f <- geneset_name2
+  shortname_f <- "test"
+  condition_f<-conditions
+  vsd_data_f<-vsd_data
+  directory_f<-directory_save
+  }
+
+  mat_set_vsd_f <- vsd_data_f[geneset_f,condition_f$Sample]
+  title_f <- paste0("PCA based on normalized expressions\n",name_f,"")
+  p_1 <- myPCA(mat_set_f = mat_set_vsd_f ,title_f=title_f,condition_f=condition_f, log_f=log_f,center_f=center_f,scale_f = scale_f,pc_x_f=1L,pc_y_f=2L,color_set_f=color_set_f)
+  p_2<-myPCAerrorBar(p_1,title_f = title_f ,bar_f="se",color_set_f=color_set_f)
+  filename1 <- paste0(directory_f,"/PCA_",shortname_f,".jpg")
+  filename2 <- paste0(directory_f,"/PCA_",shortname_f,"_ErrorBar",".jpg")
+  ggsave(filename1,plot=p_1$plot, device = "jpeg",width = 12, height = 8, units = "cm",dpi = 300)
+  ggsave(filename2,plot=p_2, device = "jpeg",width = 12, height = 8, units = "cm",dpi = 300)
+}
+```
+
+
+```{r}
+#myPCAplot
+#myPCAerrorBar
+#myPCA
+data_global2 <- data_customer_norm3[,s2c2$Sample]
+rownames(s2c2)=s2c2$Sample
+s2c2$Group=s2c2$group1
+pca_results <- myPCA(mat_set_f=data_global2,title_f ="My PCA", condition_f=s2c2,log_f=FALSE, center_f=TRUE, scale_f=FALSE,pc_x_f=2L,pc_y_f=3L,color_set_f=color_2pairs) 
+pca_results$plot
+
+myPCAplot(geneset_f=rownames(data_global2),
+          name_f="Summary Metabolites (Plasma) ",
+          shortname_f="summaryMetabolite_Baseline_Plasma",
+          condition_f=s2c2,
+          vsd_data_f=data_global2,
+          directory_f="PCA",
+          pc_x_f=1L,pc_y_f=2L,color_set_f=color_2pairs,
+          log_f=FALSE,center_f=TRUE,scale_f=FALSE)
+
+
+```
+
+
+##Design Matrix based on filtered subjects
+```{r,eval=TRUE}
+
+data_global2 <- data_customer_norm3[,s2c2$Sample]
+rownames(s2c2)=s2c2$Sample
+
+#, phenoData=s2c, featureData=names_global
+ all(rownames(s2c2)==colnames(data_global2))
+ #s2c2 <- s2c2[,c(-7,-8)]
+ metadata <- data.frame(labelDescription=c("Sample" ,  "Plasma" ,"Cortex"     , "Sex"   ,    "Genotype"  ,    "Treatment"  ,  "Cohort"  ,  "APOE","goup1","Group","Sex.APOE" ), 
+                        row.names=c("Sample" ,  "Plasma" ,"Cortex"     , "Sex"   ,    "Genotype"  ,    "Treatment"  ,  "Cohort"  ,  "APOE","goup1","Group","Sex.APOE" ))
+ 
+ 
+ phenoData <- new("AnnotatedDataFrame",data=s2c2, varMetadata=metadata)
+ 
+ #"PATHWAY.SORTORDER" "BIOCHEMICAL"       "SUPER.PATHWAY"     "SUB.PATHWAY"       "COMP.ID"           "PLATFORM"          "CHEMICAL.ID"      
+# "RI"                "MASS"              "CAS"               "PUBCHEM"           "KEGG"              "HMDB"  
+ names_global2 <- data.frame(Name=rownames(data_global2) ) #names_p180[,c("Name","Category")]
+ #names_global2 <- names_global2[names_global2$Name %in% rownames(data_global2),]
+ rownames(names_global2) <- names_global2$Name
+ all(rownames(names_global2)==rownames(data_global2))
+ names_global2$Category ="Summary"
+ metadata2 <- data.frame(labelDescription=c("Name","Category"), 
+                        row.names=c("Name","Category"))
+ 
+ 
+ nameData2 <- new("AnnotatedDataFrame",data=names_global2, varMetadata=metadata2)
+ 
+ 
+ExpData <- Biobase::ExpressionSet(assayData=as.matrix(data_global2),phenoData=phenoData, featureData=nameData2)
+ exprs(ExpData)
+```
+
+
+```{r,eval=TRUE}
+vfit <- lmFit(ExpData, design)
+vfit_contr <- contrasts.fit(vfit, contrasts=contr.matrix)
+
+efit <- eBayes(vfit_contr)
+
+#vfit2 <- lmFit(ExpData, design2)
+#vfit_contr2 <- contrasts.fit(vfit2, contrasts=contr.matrix2)
+
+#efit2 <- eBayes(vfit_contr2)
+
+```
+
+
+
+```{r}
+plotSA(vfit_contr, main="Final model: Mean−variance trend")
+
+```
+
+```{r}
+plotSA(efit, main="Final model: Mean−variance trend")
+
+```
+
+
+```{r}
+summary(decideTests(vfit_contr))
+
+```
+
+```{r}
+summary(decideTests(efit))
+
+```
+
+```{r}
+head(coef(vfit_contr))
+
+#fit2$t <- fit2$coef/fit2$stdev.unscaled/fit2$sigma
+#fit2$p.value <- 2 * pt(-abs(fit2$t), df = fit2$df.residual)
+vfit_contr$t <- vfit_contr$coefficients/vfit_contr$stdev.unscaled/vfit_contr$sigma
+vfit_contr$p.value <- 2 * pt(-abs(vfit_contr$t), df = vfit_contr$df.residual)
+
+vfit_contr$p.value
+```
+
+
+```{r}
+topTable(efit,number=10,coef="APOE4vsAPOE3_Female",adjust.method = "BH")
+```
+
+```{r}
+vfit_contr$p.value[order(vfit_contr$p.value[,"APOE4vsAPOE3_Female"])[1:10],]
+```
+
+
+```{r}
+topTable(efit,number=15,coef="APOE4vsAPOE3_Female",adjust.method = "BH")
+```
+
+#Save the results
+```{r}
+home_d = "~/Dropbox/mouse/metabolites/plasma_Mouse_R/baseline"
+
+#summary(decideTests(efit))
+topTable(efit,coef=1,sort.by="P") #coef=1
+comparisons <- colnames(summary(decideTests(efit)))
+
+for(i in 1:length(comparisons)){
+  current_compare <- comparisons[i]
+  currentDEGs <- topTable(efit,number=Inf,coef=current_compare,adjust.method = "BH")
+  write.csv(currentDEGs,file=file.path(home_d,paste0(current_compare,"_4groups_customer.csv")))
+  currentRNK <- currentDEGs[,c("Name","t")]
+  write.table(currentRNK,file=file.path(home_d,paste0(current_compare,"_4groups_customer.rnk")),col.names = FALSE,row.names = FALSE)
+      
+}
+
+```
+
+
+#Heatmap & Boxplot
+##Plot boxplot
+```{r}
+home_dir <-  "~/Dropbox/mouse/metabolites/plasma_Mouse_R/baseline"
+theme_set(theme_bw())
+p_threshold = 0.05
+#s2c2 <- s2c[s2c$Treatment=="Vehicle",]
+data_plasma2 <- data_customer_norm3[,s2c2$Sample]  #data_plasma[,s2c2$Sample]
+#s2c2$APOE.Treatment <- paste0(s2c2$Genotype,".",s2c2$Treatment)
+
+wrapper <- function(x, ...) 
+{
+  paste(strwrap(x, ...), collapse = "\n")
+}
+#colnames(summary(decideTests(efit)))
+comparisons <- c("APOE4sAPOE3_Female",
+                 "APOE4vsAPOE3_Male",
+                 "FemalevsMale_APOE3",
+                 "FemalevsMale_APOE4",
+                 "FemalevsMale_APOE4vsAPOE3")
+
+factorname <- c("Sex","Sex","Sex","Sex.APOE")
+factorname2 <- c("Sex.APOE","Sex.APOE","Sex.APOE","Sex.APOE","Sex.APOE")
+levels<- list(c("M.APOE3",
+                "M.APOE4",
+                "F.APOE3",
+                "F.APOE4"),
+              c("APOE3.Male",
+                "APOE3.Female",
+                "APOE4.Male",
+                "APOE4.Female"))
+i=1
+
+if(FALSE){
+for(i in 1:length(comparisons)){
+  current_compare <- comparisons[i]
+  fixedFactorName <- strsplit(current_compare,"_")[[1]][-1]
+  current_compare_dir <- paste0(home_dir,"/",current_compare)
+  ifelse(!dir.exists(current_compare_dir), dir.create(current_compare_dir), FALSE)
+
+  stat_result <- read.delim2(file=file.path(home_dir,paste0(current_compare,"_4groups_customer.csv")),sep=",")
+  stat_result <- stat_result[,-1]
+  stat_result$logFC <- as.numeric(stat_result$logFC)
+  stat_result$AveExpr <- as.numeric(stat_result$AveExpr)
+  stat_result$adj.P.Val <- as.numeric(stat_result$adj.P.Val)
+  stat_result$t <- as.numeric(stat_result$t)
+  stat_result$P.Value <- as.numeric(stat_result$P.Value)
+  stat_result <- stat_result[stat_result$P.Value < p_threshold,]
+  
+  stat_result <- stat_result[,c("Name","Category","logFC","P.Value","adj.P.Val")]
+  write.csv(stat_result,file=paste0(current_compare_dir,"/",current_compare,"_filter4groups_customer.csv"))
+  
+  result_summary <- data.frame(metabolite="A",expr_mean=0,condition=factorname2[(i)],Category="lipid")  
+  j=1
+  for(j in 1:length(stat_result$Name)){
+    current_cmp <- stat_result$Name[j]
+    tmp <- data_plasma2[current_cmp,]
+    tmp2 <- s2c2
+    tmp2$exprs = tmp
+    
+    tmp3 <- tmp2
+    #Get the aggregated mean by Sex.Treatment
+    #tmp_result <- aggregate(exprs~Sex.Treatment, data=tmp3,FUN=mean)
+    tmp_result <- aggregate(tmp3$exprs,by=list(condition=tmp3[,factorname2[(i)]]),FUN=mean)
+    tmp_result[,"metabolite"]=current_cmp
+    colnames(tmp_result) <- c("condition","expr_mean","metabolite")
+    tmp_result <- tmp_result[,c(3,2,1)]
+    tmp_result$Category <- stat_result$Category[j]
+    result_summary <- rbind(result_summary,tmp_result)
+    
+    ##Plot current compounds
+    if(as.numeric(stat_result$logFC[j]) > 0){
+      tip="Up"
+    }else{
+      tip="Down"
+    }
+    
+    current_sup <- stat_result$Category[j]
+    #current_sub <- stat_result$SUB.PATHWAY[j]
+    current_names <- c(current_sup,current_cmp)
+    current_names <- gsub("/","_",current_names)
+    current_names <- gsub(",","_",current_names)
+    current_names <- gsub("-","_",current_names)
+    current_names <- gsub(":","_",current_names)
+      ifelse(!dir.exists(current_compare_dir), dir.create(current_compare_dir), FALSE)
+
+    ifelse(!dir.exists(file.path(current_compare_dir, current_names[1])), dir.create(file.path(current_compare_dir, current_names[1])), FALSE)
+    #ifelse(!dir.exists(file.path(current_compare_dir, current_names[1],current_names[2])), 
+        #    dir.create(file.path(current_compare_dir, current_names[1],current_names[2])), FALSE)
+    
+    p=ggplot(tmp3, aes_string(x="Sex", y="exprs", fill="APOE")) +
+        geom_boxplot(position=position_dodge(1)) +
+        geom_dotplot(binaxis='y', stackdir='center',position=position_dodge(1) )+ #,aes_string(shape = factorname[i])
+        #geom_jitter(aes_string(shape = factorname[1+(i+1)%%4]), position =position_dodge(1) ,size=4) +#position_jitter(0.1)
+        #labs(title = paste(strwrap(current_cmp, width = 20), collapse = "\n"),y = "Normalized Expression") +
+        ylab("Baseline Expression") + 
+        ggtitle(wrapper(current_cmp, width = 20))+
+        theme(plot.title = element_text(hjust = 0.5))
+    
+    #p+geom_jitter(aes_string(shape = factorname[1+(i+1)%%4]), position = position_jitter(0.2))
+    ggsave(filename=file.path(current_compare_dir, current_names[1],paste0(tip,"_",current_names[2],"_baseline_4groups.jpg")),
+           plot=p,width=12,height=8,units = "cm",dpi = 300)
+  }
+  
+  #Save result all summary
+  result_summary <- result_summary[-1,]
+  write.csv(result_summary,file=paste0(current_compare_dir,"/",current_compare,"_ResultSummary_4groups.csv"))
+  result_summary$condition <- factor(result_summary$condition,levels= levels[[1]])  #ceiling(i/3)
+  result_summary <- result_summary[order(result_summary$metabolite),]
+  n_cpd <- length(unique(result_summary$metabolite))
+  p=ggplot(result_summary) +
+        geom_line(aes(x=condition, y=expr_mean, group=metabolite,color=metabolite)) +
+        ylab(wrapper("Average Expression (Baseline)", width = 20)) + 
+        xlab("")+
+        ggtitle(wrapper("All metabolites with p < 0.05", width = 20))+
+        theme(plot.title = element_text(hjust = 0.5,face="bold"))+
+        theme(axis.text.x = element_text(angle = 30, hjust = 1,face="bold"))+
+        theme(axis.text.y = element_text(face="bold"))+
+        theme(legend.position="bottom") + 
+        guides(fill=guide_legend(nrow=ceiling(n_cpd/5), byrow=TRUE))+
+        theme(legend.title=element_text(size=5),legend.text=element_text(size=4))
+  ggsave(filename=file.path(current_compare_dir, paste0(current_compare,"_all_DIFF_4groups.jpg")),
+          plot=p,width=12,height=7+ceiling(n_cpd/5)*1,units = "cm",dpi = 300)
+  
+  #draw heatmap based on all with pvalue < p_value_threshold
+  max_color <- max(result_summary$expr_mean)
+  min_color <- min(result_summary$expr_mean)
+  p_heatmap <- ggplot(result_summary, aes(condition, metabolite)) + geom_tile(aes(fill = expr_mean),colour = "white") + 
+     #scale_fill_gradient(low = "green",high = "red")+
+     scale_fill_gradientn(colors=c(muted("blue"),"white",muted("red")),values=rescale(c(min_color,0,max_color)),limits=c(min_color,max_color))+
+     xlab("")+
+     ylab("")+
+     theme(axis.text.x = element_text(angle = 30, hjust = 1,face="bold",size="14"), axis.text.y=element_text(face="bold",size="14"))+
+     theme(legend.title=element_text(size=14,face="bold"),legend.text=element_text(size=14,face="bold"))
+  
+  ggsave(filename=file.path(current_compare_dir, paste0(current_compare,"_heatmap_DIFF_4groups.jpg")),
+          plot=p_heatmap,width=18,height=8+ceiling(n_cpd/2)*1,units = "cm",dpi = 300)
+  
+  #Save result subsuperPathways
+  unique_pathways <- unique(result_summary$Category)
+  k=1
+  for(k in 1:length(unique_pathways)){
+    current_pathway <- unique_pathways[k]
+    current_pathway2 <- gsub(" ","_",current_pathway)
+    current_pathway2 <- gsub("/","_",current_pathway2)
+    current_pathway2 <- gsub("\\\\","_",current_pathway2)
+    current_pathway2 <- gsub(",","_",current_pathway2)
+    result_currentpathway <- result_summary[result_summary$Category==current_pathway,]
+    n_current <- length(unique(result_currentpathway$metabolite))
+    p=ggplot(result_currentpathway) +
+        geom_line(aes(x=condition, y=expr_mean, group=metabolite,color=metabolite)) +
+        ylab(wrapper("Average Expression", width = 20)) + 
+        xlab("")+
+        ggtitle(wrapper(paste0(current_pathway," with p < 0.05 (",comparisons[i],")"), width = 20))+
+        theme(plot.title = element_text(hjust = 0.5,face="bold"))+
+        theme(axis.text.x = element_text(angle = 30, hjust = 1,face="bold"))+
+        theme(axis.text.y = element_text(face="bold"))+
+        theme(legend.position="bottom") + 
+        guides(fill=guide_legend(nrow=ceiling(n_current/3),ncol=3, byrow=TRUE))+
+        theme(legend.title=element_text(size=8),legend.text=element_text(size=8))
+    ggsave(filename=file.path(current_compare_dir, paste0(current_compare,"_", current_pathway2,"_4groups.jpg")),
+            plot=p,width=12,height=7+ceiling(n_current/3)*1,units = "cm",dpi = 300)
+    
+    
+    #draw heatmap based on current superpathways with pvalue < p_value_threshold
+     max_color <- max(result_currentpathway$expr_mean)
+    min_color <- min(result_currentpathway$expr_mean)
+    p_heatmap <- ggplot(result_currentpathway, aes(condition, metabolite)) + geom_tile(aes(fill = expr_mean),colour = "white") + 
+     #scale_fill_gradient(low = "green",high = "red")+
+      scale_fill_gradientn(colors=c(muted("blue"),"white",muted("red")),values=rescale(c(min_color,0,max_color)),limits=c(min_color,max_color))+
+     xlab("")+
+     ylab("")+
+     theme(axis.text.x = element_text(angle = 30, hjust = 1,face="bold",size="14"), axis.text.y=element_text(face="bold",size="14"))+
+     theme(legend.title=element_text(size=14,face="bold"),legend.text=element_text(size=14,face="bold"))
+  
+  
+    ggsave(filename=file.path(current_compare_dir, paste0(current_compare,"_heatmap",current_pathway2,"_4groups.jpg")),
+          plot=p_heatmap,width=18,height=8+ceiling(n_current/2)*1,units = "cm",dpi = 300)
+  }
+  
+  
+  
+  
+}
+
+
+}
+
+
+```
+
+
+##heatmap for all categories
+```{r}
+scale_tip=FALSE
+i=1
+data_customer_norm3[,s2c2$Sample] -> data_plasma2
+result_summary <- data.frame(metabolite="A",expr_mean=0,condition=factorname2[(i)],Category="lipid")  
+  j=1
+  for(j in 1:length(groupnames_customer)){
+    current_cmp <- groupnames_customer[j]
+    if(current_cmp %in% rownames(data_plasma2)){
+      tmp <- data_plasma2[current_cmp,]
+      tmp2 <- s2c2
+      tmp2$exprs = tmp
+    
+      tmp3 <- tmp2
+      #Get the aggregated mean by Sex.Treatment
+      #tmp_result <- aggregate(exprs~Sex.Treatment, data=tmp3,FUN=mean)
+      tmp_result <- aggregate(tmp3$exprs,by=list(condition=tmp3[,factorname2[(i)]]),FUN=mean)
+      tmp_result[,"metabolite"]=current_cmp
+      colnames(tmp_result) <- c("condition","expr_mean","metabolite")
+      tmp_result <- tmp_result[,c(3,2,1)]
+      tmp_result$Category <- "customer"
+      if(scale_tip){
+        tmp_result$expr_mean <- (tmp_result$expr_mean - min(tmp_result$expr_mean))/(max(tmp_result$expr_mean)-min(tmp_result$expr_mean))*2 -1
+      }
+      result_summary <- rbind(result_summary,tmp_result)
+    }
+  }
+  
+  #Save result all summary
+  result_summary <- result_summary[-1,]
+  if(FALSE){
+  write.csv(result_summary,file=paste0(home_dir,"/","All_ResultSummary_customer.csv"))
+  }
+  result_summary$condition <- factor(result_summary$condition,levels= levels(s2c2[,factorname2[i]]))  #ceiling(i/3)
+  result_summary$metabolite <- factor( result_summary$metabolite,levels=rev(groupnames_customer))
+  n_cpd <- length(unique(result_summary$metabolite))
+  if(FALSE){
+  p=ggplot(result_summary) +
+        geom_line(aes(x=condition, y=expr_mean, group=metabolite,color=metabolite)) +
+        ylab(wrapper("Average Expression (Baseline)", width = 20)) + 
+        xlab("")+
+        ggtitle(wrapper("All metabolites with p < 0.05", width = 20))+
+        theme(plot.title = element_text(hjust = 0.5,face="bold"))+
+        theme(axis.text.x = element_text(angle = 30, hjust = 1,face="bold"))+
+        theme(axis.text.y = element_text(face="bold"))+
+        theme(legend.position="bottom") + 
+        guides(fill=guide_legend(nrow=ceiling(n_cpd/5), byrow=TRUE))+
+        theme(legend.title=element_text(size=5),legend.text=element_text(size=4))
+  ggsave(filename=file.path(home_dir, paste0("summary_4groups_customer_rowScale.jpg")),
+          plot=p,width=12,height=7+ceiling(n_cpd/5)*1,units = "cm",dpi = 300)
+  }
+  #draw heatmap based on all with pvalue < p_value_threshold
+  max_color <- max(result_summary$expr_mean)
+  min_color <- min(result_summary$expr_mean)
+  
+  p_heatmap <- ggplot(result_summary, aes(condition, metabolite)) + geom_tile(aes(fill = expr_mean),colour = "white") + 
+     #scale_fill_gradient(low = "green",high = "red")+
+     scale_fill_gradientn(colors=c(muted("blue"),"white",muted("red")),values=rescale(c(min_color,0,max_color)),limits=c(min_color,max_color))+
+     xlab("")+
+     ylab("")+
+    ggtitle("Summary heatmap (plasma)")+
+     theme(axis.text.x = element_text(angle = 30, hjust = 1,face="bold",size="14"), axis.text.y=element_text(face="bold",size="14"))+
+     theme(legend.title=element_text(size=14,face="bold"),legend.text=element_text(size=14,face="bold"))
+  
+  heatmap_name = "summary_heatmap_4groups_customer.jpg"
+  if(scale_tip){
+    heatmap_name = "summary_heatmap_4groups_customer_rowScale.jpg"
+  }
+  ggsave(filename=file.path(home_dir, heatmap_name),
+          plot=p_heatmap,width=18,height=8+ceiling(n_cpd/2)*1,units = "cm",dpi = 300)
+  
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
