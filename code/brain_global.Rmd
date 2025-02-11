@@ -71,7 +71,7 @@ options(stringsAsFactors=FALSE)
 theme_set(theme_bw())
 theme_update(plot.title = element_text(hjust = 0.5),panel.grid.minor = element_blank(),panel.grid.major = element_blank())
 
-
+ 
 {
 display.brewer.pal(n = 8, name = 'Paired')
 brewer.pal(n = 8, name = "Paired")
